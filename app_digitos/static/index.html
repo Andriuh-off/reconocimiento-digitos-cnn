@@ -1,0 +1,128 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Reconocimiento de dígitos manuscritos</title>
+<style>
+:root{--bg:#e8edf0;--panel:#fff;--ink:#16222c;--mut:#5d6b76;--line:#cfd8de;--cnn:#0e7c7b;--gris:#7d8c97}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font-family:"Trebuchet MS","Segoe UI",system-ui,sans-serif;line-height:1.5}
+main{max-width:1000px;margin:0 auto;padding:28px 20px 40px}
+h1{font-size:1.7rem;margin:0 0 4px}
+.sub{margin:0 0 24px;color:var(--mut)}
+.grid{display:grid;grid-template-columns:320px 1fr;gap:24px;align-items:start}
+.panel{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:18px}
+#lienzo{display:block;width:100%;aspect-ratio:1;background:#000;border-radius:6px;cursor:crosshair;touch-action:none}
+.acciones{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-top:14px}
+button{font:inherit;padding:8px 18px;border:1px solid var(--ink);background:var(--ink);color:#fff;border-radius:6px;cursor:pointer}
+button:focus-visible{outline:3px solid var(--cnn);outline-offset:2px}
+.vista{display:flex;align-items:center;gap:10px;font-size:.8rem;color:var(--mut);max-width:150px}
+#vista{width:56px;height:56px;image-rendering:pixelated;border-radius:4px;flex:none}
+.estado{margin:0 0 14px;font-size:1.1rem;min-height:1.7em}
+.modelos{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:14px}
+.m{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:14px 16px}
+.m.cnn{border:2px solid var(--cnn)}
+.m h2{margin:0;font-size:1rem}
+.m.cnn h2{color:var(--cnn)}
+.d{font-size:4rem;font-weight:700;line-height:1.1;font-variant-numeric:tabular-nums}
+.m p{margin:0;font-size:.85rem;color:var(--mut)}
+.bars{display:flex;gap:3px;list-style:none;margin:12px 0 0;padding:0}
+.bars li{flex:1;display:flex;flex-direction:column;justify-content:flex-end;align-items:center;height:78px}
+.bars i{display:block;width:100%;background:var(--gris);opacity:.4;border-radius:2px 2px 0 0}
+.bars .top i{opacity:1}
+.cnn .bars i{background:var(--cnn)}
+.bars b{font-size:.7rem;font-weight:400;color:var(--mut);margin-top:3px}
+@media(max-width:760px){.grid{grid-template-columns:1fr}}
+</style>
+</head>
+<body>
+<main>
+<h1>Reconocimiento de dígitos manuscritos</h1>
+<p class="sub">Dibuja un número del 0 al 9 con el mouse. Los tres modelos lo leen en tu computadora, sin internet.</p>
+<div class="grid">
+<section class="panel">
+<canvas id="lienzo" width="280" height="280" aria-label="Lienzo para dibujar un dígito"></canvas>
+<div class="acciones">
+<button id="borrar" type="button">Borrar</button>
+<div class="vista"><canvas id="vista" width="28" height="28"></canvas><span>Lo que ve el modelo (28×28)</span></div>
+</div>
+</section>
+<section>
+<p id="estado" class="estado" aria-live="polite"></p>
+<div id="modelos" class="modelos"></div>
+</section>
+</div>
+</main>
+<script>
+const cv=document.getElementById('lienzo'),ctx=cv.getContext('2d');
+const vista=document.getElementById('vista'),vc=vista.getContext('2d');
+const est=document.getElementById('estado'),cont=document.getElementById('modelos');
+let dibujando=false;
+ctx.lineWidth=20;ctx.lineCap='round';ctx.lineJoin='round';ctx.strokeStyle='#fff';
+
+function limpiar(){
+  ctx.fillStyle='#000';ctx.fillRect(0,0,280,280);
+  vc.fillStyle='#000';vc.fillRect(0,0,28,28);
+  cont.innerHTML='';est.textContent='Dibuja un dígito para empezar.';
+}
+function pos(e){const r=cv.getBoundingClientRect();return [(e.clientX-r.left)*280/r.width,(e.clientY-r.top)*280/r.height];}
+
+cv.addEventListener('pointerdown',e=>{
+  dibujando=true;cv.setPointerCapture(e.pointerId);
+  const [x,y]=pos(e);ctx.beginPath();ctx.moveTo(x,y);ctx.lineTo(x+0.1,y);ctx.stroke();
+});
+cv.addEventListener('pointermove',e=>{
+  if(!dibujando)return;const [x,y]=pos(e);ctx.lineTo(x,y);ctx.stroke();
+});
+['pointerup','pointercancel'].forEach(ev=>cv.addEventListener(ev,()=>{
+  if(!dibujando)return;dibujando=false;predecir();
+}));
+document.getElementById('borrar').addEventListener('click',limpiar);
+
+// Igual que MNIST: dígito en 20x20, centrado por centro de masa en 28x28, valores de 0 a 1
+function preparar(){
+  const W=280,d=ctx.getImageData(0,0,W,W).data;
+  let x0=W,y0=W,x1=-1,y1=-1;
+  for(let y=0;y<W;y++)for(let x=0;x<W;x++){
+    if(d[(y*W+x)*4]>30){if(x<x0)x0=x;if(x>x1)x1=x;if(y<y0)y0=y;if(y>y1)y1=y;}
+  }
+  if(x1<0)return null;
+  const w=x1-x0+1,h=y1-y0+1,s=20/Math.max(w,h);
+  const t=document.createElement('canvas');t.width=t.height=28;
+  const c=t.getContext('2d');c.fillStyle='#000';c.fillRect(0,0,28,28);
+  c.drawImage(cv,x0,y0,w,h,(28-w*s)/2,(28-h*s)/2,w*s,h*s);
+  const a=c.getImageData(0,0,28,28).data;let m=0,mx=0,my=0;
+  for(let i=0;i<784;i++){const v=a[i*4];m+=v;mx+=v*(i%28);my+=v*Math.floor(i/28);}
+  const u=document.createElement('canvas');u.width=u.height=28;
+  const k=u.getContext('2d');k.fillStyle='#000';k.fillRect(0,0,28,28);
+  k.drawImage(t,Math.round(14-mx/m),Math.round(14-my/m));
+  vc.imageSmoothingEnabled=false;vc.drawImage(u,0,0);
+  const e=k.getImageData(0,0,28,28).data;
+  return Array.from({length:784},(_,i)=>e[i*4]/255);
+}
+
+async function predecir(){
+  const px=preparar();
+  if(!px){est.textContent='Dibuja un dígito para empezar.';return;}
+  est.textContent='Leyendo…';
+  try{
+    const r=await fetch('/predict',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({pixels:px})});
+    const j=await r.json();
+    if(!r.ok)throw new Error(j.error||'Error del servidor');
+    mostrar(j.modelos);
+  }catch(err){est.textContent='No se pudo leer el dígito: '+err.message;}
+}
+
+function mostrar(ms){
+  const ds=ms.map(m=>m.digito),igual=ds.every(d=>d===ds[0]);
+  est.textContent=igual?`Los 3 modelos leen un ${ds[0]}.`:`Los modelos no coinciden: ${ds.join(', ')}.`;
+  cont.innerHTML=ms.map(m=>{
+    const barras=m.probs.map((p,i)=>`<li class="${i===m.digito?'top':''}"><i style="height:${Math.max(2,Math.round(p*60))}px"></i><b>${i}</b></li>`).join('');
+    return `<article class="m${m.nombre==='CNN'?' cnn':''}"><h2>${m.nombre}</h2><div class="d">${m.digito}</div><p>${(m.confianza*100).toFixed(1)} % de confianza</p><ul class="bars">${barras}</ul></article>`;
+  }).join('');
+}
+limpiar();
+</script>
+</body>
+</html>
