@@ -2,8 +2,8 @@
 
 Trabajo final de Machine Learning y Deep Learning con Python.
 
-**Autor:** [Apellidos y nombres]
-**Curso:** [Nombre del curso]
+**Autor:** Coaguila Mendoza Ronaldinho Andres
+**Curso:** MACHINE LEARNING Y DEEP LEARNING
 **Institución:** SENATI
 
 ## Caso práctico
